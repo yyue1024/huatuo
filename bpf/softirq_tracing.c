@@ -131,8 +131,8 @@ void probe_tick_stop(struct trace_event_raw_tick_stop *ctx)
 	return;
 }
 
-SEC("kprobe/tick_nohz_restart_sched_tick")
-void probe_tick_nohz_restart_sched_tick(struct pt_regs *ctx)
+SEC("kprobe/tick_nohz_restart")
+void probe_tick_nohz_restart(struct pt_regs *ctx)
 {
 	struct timer_softirq_run_ts *ts;
 	int key = 0;

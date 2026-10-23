@@ -49,10 +49,10 @@ struct sk_buff___tt { // tstamp_type
 } __attribute__((preserve_access_index));
 
 // Mirrors enum skb_tstamp_type in include/linux/skbuff.h
-enum skb_tstamp_type {
-	SKB_CLOCK_REALTIME,
-	SKB_CLOCK_MONOTONIC,
-	SKB_CLOCK_TAI,
+enum huatuo_skb_tstamp_type {
+	HUATUO_SKB_CLOCK_REALTIME,
+	HUATUO_SKB_CLOCK_MONOTONIC,
+	HUATUO_SKB_CLOCK_TAI,
 };
 
 // skb_clock_class detects which clock domain skb->tstamp belongs to via CO-RE.
@@ -66,9 +66,9 @@ static inline int skb_clock_class(struct sk_buff *skb)
 
 	if (bpf_core_field_exists(skb_tt->tstamp_type)) {
 		u8 t = BPF_CORE_READ_BITFIELD_PROBED(skb_tt, tstamp_type);
-		if (t == SKB_CLOCK_TAI)
+		if (t == HUATUO_SKB_CLOCK_TAI)
 			return -1;
-		return (t == SKB_CLOCK_MONOTONIC) ? 1 : 0;
+		return (t == HUATUO_SKB_CLOCK_MONOTONIC) ? 1 : 0;
 	}
 	if (bpf_core_field_exists(skb_mdt->mono_delivery_time))
 		return !!BPF_CORE_READ_BITFIELD_PROBED(skb_mdt,

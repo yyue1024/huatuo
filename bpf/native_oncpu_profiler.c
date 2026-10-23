@@ -6,7 +6,6 @@
 
 #include "bpf_profiler.h"
 #include "bpf_dbg.h"
-#include "bpf_map.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 

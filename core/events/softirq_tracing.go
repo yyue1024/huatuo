@@ -148,26 +148,16 @@ func attachIrqAndEventPipe(ctx context.Context, b bpf.BPF) (bpf.PerfEventReader,
 		return nil, err
 	}
 
-	/*
-	 * NOTE: There might be more than 100ms gap between the attachment of hooks,
-	 * so the order of attaching the kprobe and tracepoint is important for us.
-	 * probe_scheduler_tick should not be attached before probe_tick_stop and not be
-	 * attached later than probe_tick_nohz_restart_sched_tick. So only
-	 * probe_tick_stop -> probe_scheduler_tick -> probe_tick_nohz_restart_sched_tick
-	 * works for the scenario.
-	 *
-	 * But we can't control the order of detachment, as it is executed in a random
-	 * sequence in HuaTuo. Therefore, when we exit due to some special reasons, a
-	 * small number of false alarm might be hit.
-	 */
+	// The scheduler wrapper can be inlined. Its tick_nohz_restart callee
+	// marks the timer restart without depending on the wrapper's symbol.
 	if err := b.AttachWithOptions([]bpf.AttachOption{
 		{
 			ProgramName: "probe_account_process_tick",
 			Symbol:      "account_process_tick",
 		},
 		{
-			ProgramName: "probe_tick_nohz_restart_sched_tick",
-			Symbol:      "tick_nohz_restart_sched_tick",
+			ProgramName: "probe_tick_nohz_restart",
+			Symbol:      "tick_nohz_restart",
 		},
 		{
 			ProgramName: "probe_tick_stop",

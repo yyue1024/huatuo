@@ -5,7 +5,6 @@
 #include <bpf/bpf_tracing.h>
 
 #include "bpf_dbg.h"
-#include "bpf_map.h"
 #include "bpf_profiler.h"
 #include "bpf_sched.h"
 
@@ -241,7 +240,7 @@ offcpu_record_sched_out(struct bpf_raw_tracepoint_args *ctx,
 		state.kind = PROFILER_OFFCPU_EVENT_BLOCKED;
 	}
 
-	if (bpf_map_update_elem(&offcpu_states, &key, &state, BPF_ANY) < 0) {
+	if (bpf_map_update_elem(&offcpu_states, &key, &state, COMPAT_BPF_ANY) < 0) {
 		offcpu_stat_inc(PROFILER_OFFCPU_STAT_STATE_UPDATE_FAILURE);
 		return;
 	}

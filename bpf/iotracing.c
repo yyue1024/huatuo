@@ -384,22 +384,14 @@ static __always_inline int bpf_file_read_write(struct pt_regs *ctx)
 	count = BPF_CORE_READ(from, count);
 
 	/*
-	 * iov_iter direction across kernel versions:
-	 *   pre-5.14: iov_iter::type        (low bit: 0=read, 1=write)
-	 *   5.14~6.x: iov_iter::data_source (bool: 0=read, 1=write)
-	 *   7.0+:     iov_iter::iter_type   (low bit: 0=read, 1=write)
+	 * data_source encodes direction; iter_type only describes the buffer.
+	 * Older kernels pack direction into the low bit of type instead.
 	 */
-	if (bpf_core_field_exists(from->type)) {
-		type = BPF_CORE_READ(from, type);
-	} else if (bpf_core_field_exists(((struct iov_iter___7_0 *)0)->iter_type)) {
-		struct iov_iter___7_0 *from7 = (struct iov_iter___7_0 *)from;
-
-		type = BPF_CORE_READ(from7, iter_type);
+	struct iov_iter___5_14 *from_new = (void *)from;
+	if (bpf_core_field_exists(from_new->data_source)) {
+		type = BPF_CORE_READ(from_new, data_source);
 	} else {
-		struct iov_iter___5_14 *from_new;
-
-		from_new = (struct iov_iter___5_14 *)from;
-		type	 = BPF_CORE_READ(from_new, data_source);
+		type = BPF_CORE_READ(from, type);
 	}
 
 	type = type & 0x1;

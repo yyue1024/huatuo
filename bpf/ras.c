@@ -190,8 +190,16 @@ int probe_ras_non_standard(struct trace_event_raw_non_standard_event *ctx)
 	return 0;
 }
 
+/* PCIe AER may be disabled in the kernel used to generate vmlinux.h.
+ * The tracepoint prefix is fixed; a local layout avoids requiring its BTF.
+ */
+struct huatuo_trace_aer_event {
+	struct trace_entry ent;
+	u32 __data_loc_dev_name;
+};
+
 SEC("tracepoint/ras/aer_event")
-int probe_ras_aer_event(struct trace_event_raw_aer_event *ctx)
+int probe_ras_aer_event(struct huatuo_trace_aer_event *ctx)
 {
 	int key = 0;
 	struct ras_event *event;
