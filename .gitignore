@@ -4,3 +4,6 @@ _output/
 cmd/**/bin/
 **/mock_*_test.go
 internal/bpf/abi/*_types_generated.go
+/huatuo-bamai-*-static-linux-*/
+/huatuo-bamai-*-static-linux-*.tar.gz
+/.huatuo-release.*/

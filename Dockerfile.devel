@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.24-alpine3.22 AS base
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.6.1@sha256:923441d7c25f1e2eb5789f82d987693c47b8ed987c4ab3b075d6ed2b5d6779a3 AS cross-tools
+
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine3.22 AS base
 #
 # To accelerate the build process, you may uncomment this section.
 # RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
@@ -13,6 +15,12 @@ ENV GOROOT="/usr/local/go"
 ENV GOPROXY="https://goproxy.cn,https://goproxy.io,direct"
 ENV PATH="${GOPATH}/bin:${GOROOT}/bin:/usr/lib/llvm15/bin:${PATH}"
 
+# Generators execute on the build host, including during ARM64 builds.
+RUN set -x; \
+    go install -v github.com/vektra/mockery/v2@v2.53.6 && \
+    go install -v capnproto.org/go/capnp/v3/capnpc-go@v3.1.0-alpha.2
+
+FROM base AS lint-tools
 # For golang 1.23.0
 # gofumpt@v0.8.0, https://github.com/mvdan/gofumpt/blob/master/CHANGELOG.md
 # goimports@v0.36.0
@@ -21,23 +29,40 @@ RUN set -x; \
     go install mvdan.cc/gofumpt@v0.8.0 && \
     go install mvdan.cc/sh/v3/cmd/shfmt@v3.11.0 && \
     go install golang.org/x/tools/cmd/goimports@v0.36.0 && \
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2 && \
-    go install github.com/vektra/mockery/v2@v2.53.6 && \
-    go install capnproto.org/go/capnp/v3/capnpc-go@latest
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2
 
 FROM base AS dev-build
 WORKDIR /go/huatuo-bamai
 ENV GOCACHE=/root/.cache/go-build
 COPY . .
+
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+RUN test "$BUILDPLATFORM" = "$TARGETPLATFORM" || { echo "Use build/build-run-testing-image.sh for cross-compilation" >&2; exit 1; }
 RUN --mount=type=cache,target=${GOCACHE} \
     make all && \
     cp -a _output /tmp/huatuo-bamai
 
+# Keep toolchain installation independent of source and commit changes.
+FROM base AS arm64-toolchain
+COPY --from=cross-tools / /
+ARG BUILDARCH
+# The reusable image runs on the builder but always cross-compiles for ARM64.
+ENV TARGETPLATFORM=linux/arm64 TARGETOS=linux TARGETARCH=arm64
+LABEL tech.huatuo.toolchain.target="linux/arm64"
+RUN case "$BUILDARCH" in amd64|arm64) ;; *) echo "Use an AMD64 or ARM64 builder" >&2; exit 1 ;; esac
+RUN apk add --no-cache binutils lld file && \
+    ln -s /usr/lib/llvm15/bin/clang /usr/bin/clang && \
+    ln -s /usr/lib/llvm15/bin/clang++ /usr/bin/clang++ && \
+    xx-apk add --no-cache musl-dev gcc && \
+    xx-clang --setup-target-triple
+
 FROM alpine:3.22.0 AS dev-runtime
 ARG RUN_PATH=/home/huatuo-bamai
-RUN apk add --no-cache curl
-COPY --from=dev-build /tmp/huatuo-bamai ${RUN_PATH}
 WORKDIR ${RUN_PATH}
 
+RUN apk add --no-cache curl
+COPY --from=dev-build /tmp/huatuo-bamai ${RUN_PATH}
+
 # Keep the default target as the interactive development toolchain image.
-FROM base AS devel
+FROM lint-tools AS devel
