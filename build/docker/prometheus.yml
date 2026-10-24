@@ -15,7 +15,7 @@ scrape_configs:
 
   - job_name: "huatuo"
     static_configs:
-      - targets: ["localhost:19704"]
+      - targets: ["10.126.xxx.xxx:19704"]
 
   - job_name: "k8s-pods"
     kubernetes_sd_configs:

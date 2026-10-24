@@ -42,7 +42,7 @@ services:
       - elasticsearch
 
   huatuo-apiserver:
-    image: huatuo/huatuo-bamai:latest
+    image: huatuo/huatuo-bamai:v2.3.0
     container_name: huatuo-apiserver
     network_mode: host
     environment:
@@ -59,6 +59,8 @@ services:
         condition: service_healthy
       prometheus:
         condition: service_started
+    extra_hosts:
+      - "ax8860:10.126.xxx.xxx"
 
   huatuo-bamai:
     image: huatuo/huatuo-bamai:latest
