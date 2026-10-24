@@ -283,8 +283,7 @@ func (p *memNativeProfiler) ReadDataLoop(ctx context.Context, enqueue func(any))
 		// Use unified drainActiveRingBuffer with Memory event factory
 		stackCountsByProc, ring, err := ringCtx.drainActiveRingBuffer(
 			func() any { return &abi.ProfilerEventBase{} },
-			p.convertValueToBytes,
-		) // Convert pages to bytes
+		)
 		if err != nil {
 			if errors.Is(err, types.ErrExitByCancelCtx) {
 				return nil

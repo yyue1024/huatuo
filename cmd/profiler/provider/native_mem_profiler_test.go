@@ -15,12 +15,171 @@
 package provider
 
 import (
+	"encoding/binary"
 	"reflect"
 	"testing"
 
 	"huatuo-bamai/internal/bpf"
+	"huatuo-bamai/internal/bpf/abi"
 	"huatuo-bamai/pkg/profiling"
 )
+
+type memoryPipelineBPFStub struct {
+	bpf.BPF
+	state [3]uint64
+}
+
+func (s *memoryPipelineBPFStub) ReadMap(mapID uint32, key []byte) ([]byte, error) {
+	if mapID != 1 {
+		return nil, nil
+	}
+
+	idx := binary.LittleEndian.Uint32(key)
+	value := make([]byte, 8)
+	binary.LittleEndian.PutUint64(value, s.state[idx])
+	return value, nil
+}
+
+func (s *memoryPipelineBPFStub) WriteMapItems(mapID uint32, items []bpf.MapItem) error {
+	if mapID != 1 {
+		return nil
+	}
+
+	for _, item := range items {
+		idx := binary.LittleEndian.Uint32(item.Key)
+		s.state[idx] = binary.LittleEndian.Uint64(item.Value)
+	}
+	return nil
+}
+
+type memoryPipelineReaderStub struct {
+	batch []any
+}
+
+func (s *memoryPipelineReaderStub) ReadInto(any) error {
+	return nil
+}
+
+func (s *memoryPipelineReaderStub) ReadBatch(func() any) ([]any, error) {
+	batch := s.batch
+	s.batch = nil
+	return batch, nil
+}
+
+func (s *memoryPipelineReaderStub) Close() error {
+	return nil
+}
+
+func TestMemoryValueConvertedOnceAfterAggregation(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        profiling.MemoryMode
+		pageSize    int64
+		probability uint
+		raw         []int64
+		want        int64
+	}{
+		{name: "physical alloc page", mode: profiling.MemoryModePhysicalAlloc, pageSize: 4096, probability: 100, raw: []int64{1}, want: 4096},
+		{name: "physical usage freed page", mode: profiling.MemoryModePhysicalUsage, pageSize: 4096, probability: 100, raw: []int64{-1}, want: -4096},
+		{name: "virtual alloc bytes", mode: profiling.MemoryModeVirtualAlloc, pageSize: 4096, probability: 100, raw: []int64{1234}, want: 1234},
+		{name: "physical alloc sampled", mode: profiling.MemoryModePhysicalAlloc, pageSize: 4096, probability: 1, raw: []int64{1, 2}, want: 1228800},
+		{name: "physical usage partial release", mode: profiling.MemoryModePhysicalUsage, pageSize: 4096, probability: 10, raw: []int64{4, -1}, want: 122880},
+		{name: "physical usage complete release", mode: profiling.MemoryModePhysicalUsage, pageSize: 4096, probability: 10, raw: []int64{4, -1, -3}, want: 0},
+		{name: "physical alloc 64K pages", mode: profiling.MemoryModePhysicalAlloc, pageSize: 65536, probability: 100, raw: []int64{1}, want: 65536},
+		{name: "physical usage sampled 64K pages", mode: profiling.MemoryModePhysicalUsage, pageSize: 65536, probability: 1, raw: []int64{-1}, want: -6553600},
+	}
+
+	for i := range tests {
+		tt := &tests[i]
+		t.Run(tt.name, func(t *testing.T) {
+			b := &memoryPipelineBPFStub{state: [3]uint64{0, uint64(len(tt.raw)), 0}}
+			reader := &memoryPipelineReaderStub{}
+			for _, value := range tt.raw {
+				reader.batch = append(reader.batch, &abi.ProfilerEventBase{
+					PIDTGID:   uint64(123) << 32,
+					Kernstack: 0,
+					Userstack: -1,
+					Value:     value,
+				})
+			}
+			ringCtx := &ringBufferContext{
+				bpf:                b,
+				readerA:            reader,
+				transferStateMapID: 1,
+				stackMapAID:        2,
+			}
+			profiler := &memNativeProfiler{
+				internalMode: tt.mode,
+				probability:  tt.probability,
+				pageSize:     tt.pageSize,
+			}
+
+			counts, ring, err := ringCtx.drainActiveRingBuffer(
+				func() any { return &abi.ProfilerEventBase{} },
+			)
+			if err != nil {
+				t.Fatalf("drainActiveRingBuffer() error = %v", err)
+			}
+
+			var samples []*stackSample
+			ringCtx.aggregateStacksAndEnqueue(counts, ring, func(record any) {
+				samples = append(samples, record.(*stackSample))
+			}, profiler.convertValueToBytes)
+
+			if tt.want == 0 {
+				if len(samples) != 0 {
+					t.Fatalf("sample count = %d, want 0 after complete release", len(samples))
+				}
+				return
+			}
+			if len(samples) != 1 {
+				t.Fatalf("sample count = %d, want 1", len(samples))
+			}
+			if got := samples[0].Value; got != tt.want {
+				t.Fatalf("sample value = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func BenchmarkMemoryDrainAggregation(b *testing.B) {
+	const batchSize = 256
+	batch := make([]any, batchSize)
+	for i := range batch {
+		batch[i] = &abi.ProfilerEventBase{
+			PIDTGID:   uint64(123) << 32,
+			Kernstack: 0,
+			Userstack: -1,
+			Value:     1,
+		}
+	}
+	backend := &memoryPipelineBPFStub{}
+	reader := &memoryPipelineReaderStub{}
+	ringCtx := &ringBufferContext{
+		bpf:                backend,
+		readerA:            reader,
+		transferStateMapID: 1,
+		stackMapAID:        2,
+	}
+	profiler := &memNativeProfiler{
+		internalMode: profiling.MemoryModePhysicalAlloc,
+		probability:  10,
+		pageSize:     4096,
+	}
+	newEvent := func() any { return &abi.ProfilerEventBase{} }
+	enqueue := func(any) {}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.state = [3]uint64{0, batchSize, 0}
+		reader.batch = batch
+		counts, ring, err := ringCtx.drainActiveRingBuffer(newEvent)
+		if err != nil {
+			b.Fatal(err)
+		}
+		ringCtx.aggregateStacksAndEnqueue(counts, ring, enqueue, profiler.convertValueToBytes)
+	}
+}
 
 func TestNewBpfLoadConfigAttachOpts(t *testing.T) {
 	tests := []struct {

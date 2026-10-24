@@ -170,16 +170,10 @@ func (r *ringBufferContext) advanceSwapParity() (activeRingBuffer, error) {
 	return ring, nil
 }
 
-// drainActiveRingBuffer drains events from the frozen ring buffer and aggregates stack traces.
+// drainActiveRingBuffer drains events from the frozen ring buffer and aggregates raw values by stack.
 // This unified method works for both CPU and Memory profilers.
-//
-// Parameters:
-// - enqueue: callback to emit aggregated records
-// - newEvent: factory function to create event struct from batch data
-// - convertValue: optional function to convert raw value (nil for CPU, non-nil for Memory)
 func (r *ringBufferContext) drainActiveRingBuffer(
 	newEvent func() any,
-	convertValue func(int64) int64,
 ) (map[processKey]map[stackIDPair]int64, activeRingBuffer, error) {
 	ring, err := r.advanceSwapParity()
 	if err != nil {
@@ -215,11 +209,9 @@ func (r *ringBufferContext) drainActiveRingBuffer(
 				continue
 			}
 
-			// Get value directly from base (CPU: 1, Memory: page/byte delta)
+			// Keep the BPF-provided unit until final aggregation (CPU: samples,
+			// virtual memory: bytes, physical memory: pages).
 			value := base.Value
-			if convertValue != nil {
-				value = convertValue(value)
-			}
 			if value == 0 {
 				continue
 			}
