@@ -1,6 +1,7 @@
 # These patterns also exclude files from the tar snapshot used for compilation.
 .git
 _output
+./data
 *.folded
 *.log
 *.o

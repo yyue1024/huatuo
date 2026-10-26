@@ -1,4 +1,25 @@
 services:
+  # Bind paths are relative to this file; ../../data is the repository data directory.
+  # Reuse the Grafana image to prepare directories for the images' default users.
+  init-data:
+    image: grafana/grafana-oss:${GRAFANA_VERSION:-12.0.3}
+    user: "0:0"
+    network_mode: none
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mkdir -p /data/elasticsearch /data/prometheus /data/grafana \
+          /data/huatuo-apiserver /data/huatuo-bamai
+        chown 1000:0 /data/elasticsearch
+        chown 65534:65534 /data/prometheus
+        chown 472:0 /data/grafana
+        chown 0:0 /data/huatuo-apiserver /data/huatuo-bamai
+        chmod 0755 /data/elasticsearch /data/prometheus /data/grafana \
+          /data/huatuo-apiserver /data/huatuo-bamai
+    volumes:
+      - ${HUATUO_DATA_DIR:-../../data}:/data
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-8.15.5}
     container_name: elasticsearch
@@ -10,6 +31,10 @@ services:
     volumes:
       - ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
       - ./elasticsearch-jvm.options:/usr/share/elasticsearch/config/jvm.options:ro
+      - ${HUATUO_DATA_DIR:-../../data}/elasticsearch:/usr/share/elasticsearch/data
+    depends_on:
+      init-data:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -u elastic:$${ELASTIC_PASSWORD} http://localhost:9200/ >/dev/null"]
       interval: 5s
@@ -23,6 +48,10 @@ services:
     network_mode: host
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${HUATUO_DATA_DIR:-../../data}/prometheus:/prometheus
+    depends_on:
+      init-data:
+        condition: service_completed_successfully
 
   grafana:
     image: grafana/grafana-oss:${GRAFANA_VERSION:-12.0.3}
@@ -37,9 +66,14 @@ services:
       - ./grafana/datasources/infinity.yaml:/etc/grafana/provisioning/datasources/infinity.yaml:ro
       - ./grafana/datasources/pyroscope.yaml:/etc/grafana/provisioning/datasources/pyroscope.yaml:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ${HUATUO_DATA_DIR:-../../data}/grafana:/var/lib/grafana
     depends_on:
-      - prometheus
-      - elasticsearch
+      init-data:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
 
   huatuo-apiserver:
     image: huatuo/huatuo-bamai:v2.3.0
@@ -52,9 +86,12 @@ services:
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
       - ../../huatuo-apiserver.conf:${RUN_PATH}/conf/huatuo-apiserver.conf:rw
+      - ${HUATUO_DATA_DIR:-../../data}/huatuo-apiserver:/var/lib/huatuo-apiserver
     working_dir: ${RUN_PATH}
     command: ["./bin/huatuo-apiserver", "--config", "huatuo-apiserver.conf"]
     depends_on:
+      init-data:
+        condition: service_completed_successfully
       elasticsearch:
         condition: service_healthy
       prometheus:
@@ -81,8 +118,11 @@ services:
       - /etc:/etc:ro
       - /var:/var:ro
       - ../../huatuo-bamai.conf:${RUN_PATH}/conf/huatuo-bamai.conf:rw
+      - ${HUATUO_DATA_DIR:-../../data}/huatuo-bamai:/var/lib/huatuo-bamai
     command: ["./bin/huatuo-bamai", "--region", "example", "--config", "huatuo-bamai.conf", "--disable-kubelet"]
     depends_on:
+      init-data:
+        condition: service_completed_successfully
       elasticsearch:
         condition: service_healthy
       prometheus:
